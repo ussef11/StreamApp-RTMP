@@ -11,7 +11,21 @@
   },
   "dependencies": {
     "react": "18.2.0",
-    "react-native": "0.73.3"
+    "react-native": "0.73.3",
+    "react-native-camera": "^4.2.1",
+    "react-native-ffmpeg": "^0.5.2",
+    "react-native-fs": "^2.20.0",
+    "react-native-nodemediaclient": "^0.2.21",
+    "react-native-permissions": "^4.1.1",
+    "react-native-restart": "^0.0.27",
+    "react-native-rtmp-publisher": "^0.4.7",
+    "react-native-tcp-socket": "^6.0.6",
+    "react-native-usb-connection": "^1.0.0",
+    "react-native-video": "^5.2.1",
+    "react-native-vision-camera": "^3.8.2",
+    "react-native-webrtc": "^118.0.1",
+    "rn-fetch-blob": "^0.12.0",
+    "socket.io-client": "^4.7.4"
   },
   "devDependencies": {
     "@babel/core": "^7.20.0",

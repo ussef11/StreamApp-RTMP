@@ -1,21 +1,64 @@
 buildscript {
     ext {
         buildToolsVersion = "34.0.0"
-        minSdkVersion = 21
+        minSdkVersion = 25
         compileSdkVersion = 34
         targetSdkVersion = 34
         ndkVersion = "25.1.8937393"
         kotlinVersion = "1.8.0"
+        googleplayServicesVersion = "17.0.1"
+        googlePlayServicesVisionVersion = "19.0.0"
+        androidMapsUtilsVersion = "2.2.3"
+
+       
     }
+    subprojects { subproject ->
+    afterEvaluate{
+        if((subproject.plugins.hasPlugin('android') || subproject.plugins.hasPlugin('android-library'))) {
+            android {
+                compileSdkVersion rootProject.ext.compileSdkVersion
+                buildToolsVersion rootProject.ext.buildToolsVersion
+            }
+        }
+    }
+}
     repositories {
         google()
         mavenCentral()
     }
+    allprojects {
+    repositories {
+        google()
+        mavenCentral()
+        maven {
+            url 'https://google.bintray.com/exoplayer/'
+        }
+        //** add this line
+        configurations.all {
+            resolutionStrategy {
+                force "com.google.android.gms:play-services-location:21.0.1"
+            }
+        }
+    }
+}
+
     dependencies {
         classpath("com.android.tools.build:gradle")
         classpath("com.facebook.react:react-native-gradle-plugin")
         classpath("org.jetbrains.kotlin:kotlin-gradle-plugin")
+        classpath('com.google.gms:google-services:4.3.3')
+        
     }
 }
 
+apply plugin: 'com.google.gms.google-services'
+
 apply plugin: "com.facebook.react.rootproject"
+
+
+
+
+
+
+
+
