@@ -114,7 +114,8 @@ const App = () => {
   };
 
   useEffect(() => {
-    if (FinishCompressed) {
+    console.log('45454545454545', isRecording);
+    if (FinishCompressed && isRecording === false) {
       console.log('restart');
       RNRestart.restart();
     }
@@ -147,6 +148,26 @@ const App = () => {
     _StartStream();
   }, []);
 
+  useEffect(() => {
+    let i = 0;
+    const interval = setInterval(async () => {
+      const fileContent = await readTextFromFile();
+
+      console.log('--0-', i);
+      console.log(fileContent);
+      if (fileContent == 'false' || fileContent == null) {
+        console.log('+++', i);
+
+        console.log('record Stopping', i);
+        stopRecording();
+        console.log('record resuming', i);
+        startRecording();
+      }
+      i++;
+    }, 60000);
+    return () => clearInterval(interval);
+  }, []);
+
   const stopStream = async () => {
     await vpRef.current.stop();
     await startRecording();
@@ -158,8 +179,6 @@ const App = () => {
 
   const streamKey = '5b2a4a75-86c2-177c-72a2-45ab2b5e2583';
   const url = `rtmp://192.168.100.50:1935/live/1234`;
-  const devices = useCameraDevices();
-  const device = devices[1];
 
   const cameraRef = useRef();
 
@@ -184,6 +203,7 @@ const App = () => {
     if (granted === PermissionsAndroid.RESULTS.GRANTED) {
       try {
         setIsRecording(true);
+        console.log('startRecording');
 
         const externalDirectoryPath = RNFS.ExternalStorageDirectoryPath;
         const directoryName = 'AllRecord';
@@ -191,7 +211,7 @@ const App = () => {
         const filePath = `${externalDirectoryPath}/${directoryName}/${fileName}`;
 
         await cameraRef.current.startRecording({
-          videoBitrate: 500000,
+          videoBitRate: 'low',
           maxDuration: 10,
           //maxFileSize: 100 * 1024 * 1024,
           outputPath: filePath,
@@ -202,8 +222,6 @@ const App = () => {
           },
           onRecordingError: error => console.error(error),
         });
-
-        console.log('startRecording');
       } catch (err) {
         console.log(err);
       }
@@ -217,42 +235,68 @@ const App = () => {
   };
 
   const compressVideoAndSave = async inputPath => {
+    try {
+      const folderPath = RNFS.ExternalStorageDirectoryPath + '/AllRecord';
+
+      let totalSizeMB = await calculateolderSize(folderPath);
+
+      while (totalSizeMB > MAX_FOLDER_SIZE_MB) {
+        console.log(
+          `Folder size exceeds ${MAX_FOLDER_SIZE_MB} MB. Removing oldest video...`,
+        );
+        RemoveoldsetVideo();
+        console.log('totalSizeMB', totalSizeMB);
+        totalSizeMB = await calculateolderSize(folderPath);
+      }
+    } catch (error) {
+      console.log('err', error);
+    }
+
     setFinishCompressed(false);
     const outputDir = `${RNFS.ExternalStorageDirectoryPath}/AllRecord`;
     const outputFileName = 'compressed_video.mp4';
     const outputPath = `${outputDir}/${outputFileName}`;
     console.log('inputPath', inputPath);
-    // const command = `ffmpeg -y -threads 1 -i ${inputPath} -c:v libx264 -preset veryfast -c:a aac 
-    // -max_muxing_queue_size 1024 ${outputPath}`;
 
-     // const command = `-y -i ${inputPath} -c:v libx264 -crf 28 -vf scale=426:240 -preset ultrafast ${outputPath}`;
-      const command = `-i ${inputPath} -vf  scale=426:240  -b:v 500k ${outputPath}`;
-    try {
-      const result = await RNFFmpeg.executeAsync(
-        command,
-        completedExecution => {
-          if (completedExecution.returnCode === 0) {
-            saveVideoToExternalStorage(outputPath);
-            console.log('FFmpeg process completed successfully');
-            setFinishCompressed(true);
-          } else {
-            console.log(
-              `FFmpeg process failed with rc=${completedExecution.returnCode}.`,
-            );
-          }
-        },
-      ).then(executionId =>
-        console.log(
-          `Async FFmpeg process started with executionId ${executionId}.`,
-        ),
-      );
+    //start save
 
-      console.log('FFmpeg output:', result);
-      console.log('Video compression successful');
-    } catch (error) {
-      console.error('Error compressing video:', error);
-    }
+    await saveVideoToExternalStorage(inputPath);
+    console.log('FFmpeg process completed successfully');
+    setFinishCompressed(true);
+    //end save
+
+    //start compress
+    //const command = `-y -i ${inputPath} -vf scale=426:240 -b:v 500k ${outputPath}`;
+    // const command = `-i ${inputPath} -vf scale=480:720 -b:v 500k ${outputPath}`;
+    // try {
+    //   const result = await RNFFmpeg.executeAsync(
+    //     command,
+    //     completedExecution => {
+    //       if (completedExecution.returnCode === 0) {
+    //         saveVideoToExternalStorage(outputPath);
+    //         console.log('FFmpeg process completed successfully');
+    //         setFinishCompressed(true);
+    //       } else {
+    //         console.log(
+    //           `FFmpeg process failed with rc=${completedExecution.returnCode}.`,
+    //         );
+    //       }
+    //     },
+    //   ).then(executionId =>
+    //     console.log(
+    //       `Async FFmpeg process started with executionId ${executionId}.`,
+    //     ),
+    //   );
+
+    //   console.log('FFmpeg output:', result);
+    //   console.log('Video compression successful');
+    // } catch (error) {
+    //   console.error('Error compressing video:', error);
+    // }
+
+    //end compress
   };
+
   const saveVideoToExternalStorage = async videoPath => {
     console.log(5555555555555555555555555555);
     try {
@@ -281,16 +325,98 @@ const App = () => {
     }
   };
 
-  const format = useCameraFormat(device, [
-    {
-      photoAspectRatio: 4 / 3,
-    },
-    {photoResolution: '480p'},
-    {videoAspectRatio: 4 / 3},
-    {videoResolution: {height: 1944, width: 2592}},
-    {width: 1000, height: 1000},
-  ]);
+  const devices = useCameraDevices();
+  const _device = devices[1];
 
+  const [device, setDevice] = useState(null);
+  const [format, setFormat] = useState(null);
+
+  useEffect(() => {
+    if (_device) {
+      setDevice(_device);
+      console.log('formatformat', _device.formats);
+      const desiredResolution = {width: 352, height: 288};
+
+      const matchingFormat = _device.formats.find(
+        f =>
+          f.videoWidth === desiredResolution.width &&
+          f.videoHeight === desiredResolution.height,
+      );
+
+      console.log('matching', matchingFormat);
+      if (matchingFormat) {
+        setFormat(matchingFormat);
+      } else {
+        console.warn('Desired resolution not supported');
+      }
+    }
+  }, [_device]);
+
+  const MAX_FOLDER_SIZE_MB = 10;
+
+  const calculateolderSize = async folderPath => {
+    try {
+      const folderStat: StatResult = await RNFS.stat(folderPath);
+      if (folderStat && folderStat.isDirectory()) {
+        const files = await RNFS.readdir(folderPath);
+        let totalSize = 0;
+        for (const file of files) {
+          const filePath = `${folderPath}/${file}`;
+          const fileStat: StatResult = await RNFS.stat(filePath);
+          if (fileStat.isFile() && filePath.endsWith('.mp4')) {
+            totalSize += fileStat.size;
+          }
+        }
+        const totalSizeMB = totalSize / (1024 * 1024);
+        return totalSizeMB;
+      }
+    } catch (err) {
+      console.log(err);
+    }
+  };
+
+  const checkAndRemoveOldestVideo = async (folderPath: string) => {
+    try {
+      const folderStat: StatResult = await RNFS.stat(folderPath);
+      if (folderStat && folderStat.isDirectory()) {
+        const files = await RNFS.readdir(folderPath);
+
+        let oldestVideo = null;
+        let oldestVideoTime = Number.MAX_SAFE_INTEGER;
+        for (const file of files) {
+          const filePath = `${folderPath}/${file}`;
+          const fileStat: StatResult = await RNFS.stat(filePath);
+          if (fileStat.isFile() && filePath.endsWith('.mp4')) {
+            if (fileStat.mtime < oldestVideoTime) {
+              oldestVideo = filePath;
+              oldestVideoTime = fileStat.mtime;
+            }
+          }
+        }
+        const totalSizeMB = await calculateolderSize(folderPath);
+        console.log(5555555555555555, totalSizeMB);
+        if (totalSizeMB > MAX_FOLDER_SIZE_MB && oldestVideo) {
+          console.log(
+            `Folder size exceeds ${MAX_FOLDER_SIZE_MB} MB. Removing oldest video: ${oldestVideo}`,
+          );
+          await RNFS.unlink(oldestVideo);
+        }
+      } else {
+        console.log('Path is not a directory');
+      }
+    } catch (error) {
+      console.error(
+        'Error checking folder size and removing oldest video:',
+        error,
+      );
+    }
+  };
+
+  const RemoveoldsetVideo = () => {
+    const folderPath = RNFS.ExternalStorageDirectoryPath + '/AllRecord';
+
+    checkAndRemoveOldestVideo(folderPath);
+  };
   return (
     <View style={{flex: 1}}>
       <View>
@@ -300,7 +426,7 @@ const App = () => {
         <Button title="Stop Recording" onPress={stopRecording} />
         <Button
           title="Save File to External Storage"
-          onPress={saveVideoToExternalStorage}
+          onPress={RemoveoldsetVideo}
         />
         {/* <View style={{height: 200}}>
           <Camera
@@ -313,17 +439,17 @@ const App = () => {
 
         <>
           {isStream == 'false' ? (
-            <View style={{height: 200}}>
+            <View style={{height: 1}}>
               {/* {console.log('isStream', isStream)} */}
               {console.log(format)}
               <Camera
                 quality="360p"
-                style={{flex: 1}}
-                device={device}
+                style={{flex: 1, transform: [{rotate: '90deg'}]}}
+                device={_device}
                 isActive={true}
                 ref={cameraRef}
                 video={true}
-                orientation="landscape-left"
+                orientation="landscapeLeft"
                 format={format}
               />
               {videoPath !== '' && (
@@ -338,7 +464,7 @@ const App = () => {
             </View>
           ) : (
             <NodeCameraView
-              style={{height: 440}}
+              style={{height: 1}}
               ref={vpRef}
               outputUrl={url}
               camera={config.cameraConfig}

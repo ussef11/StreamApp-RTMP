@@ -1,0 +1,133 @@
+user www-data;
+worker_processes auto;
+pid /run/nginx.pid;
+include /etc/nginx/modules-enabled/*.conf;
+
+events {
+	worker_connections 768;
+	# multi_accept on;
+}
+
+http {
+	
+       server {
+	
+		listen 5001;
+		
+		location / {
+			
+			root /nginx/srv/;
+			index index.html;
+			
+			add_header Cache-Control no-cache; # Disable cache
+			
+		}
+	}
+	##
+	# Basic Settings
+	##
+
+	sendfile on;
+	tcp_nopush on;
+	types_hash_max_size 2048;
+	# server_tokens off;
+
+	# server_names_hash_bucket_size 64;
+	# server_name_in_redirect off;
+
+	include /etc/nginx/mime.types;
+	default_type application/octet-stream;
+
+	##
+	# SSL Settings
+	##
+
+	ssl_protocols TLSv1 TLSv1.1 TLSv1.2 TLSv1.3; # Dropping SSLv3, ref: POODLE
+	ssl_prefer_server_ciphers on;
+
+	##
+	# Logging Settings
+	##
+
+	access_log /var/log/nginx/access.log;
+	error_log /var/log/nginx/error.log;
+
+	##
+	# Gzip Settings
+	##
+
+	gzip on;
+
+	# gzip_vary on;
+	# gzip_proxied any;
+	# gzip_comp_level 6;
+	# gzip_buffers 16 8k;
+	# gzip_http_version 1.1;
+	# gzip_types text/plain text/css application/json application/javascript text/xml application/xml application/xml+rss text/javascript;
+
+	##
+	# Virtual Host Configs
+	##
+
+	include /etc/nginx/conf.d/*.conf;
+	include /etc/nginx/sites-enabled/*;
+}
+
+
+#mail {
+#	# See sample authentication script at:
+#	# http://wiki.nginx.org/ImapAuthenticateWithApachePhpScript
+#
+#	# auth_http localhost/auth.php;
+#	# pop3_capabilities "TOP" "USER";
+#	# imap_capabilities "IMAP4rev1" "UIDPLUS";
+#
+#	server {
+#		listen     localhost:110;
+#		protocol   pop3;
+#		proxy      on;
+#	}
+#
+#	server {
+#		listen     localhost:143;
+#		protocol   imap;
+#		proxy      on;
+#	}
+#}
+rtmp {
+        server {
+                listen 1935;
+                chunk_size 4096;
+
+                application live {
+			
+			live on;
+			
+			record off;
+			# record all;
+			# record_path /recordings;
+			
+			# push rtmp://server/path/streamkey;
+			# push rtmp://a.rtmp.youtube.com/live2/0123-4567-89ab-cdef;
+			
+			hls on;
+			hls_path /nginx/srv/hls/;
+			hls_fragment 3;
+			hls_playlist_length 60;
+                        
+	                           exec ffmpeg -i rtmp://localhost/live/$name \
+                -vf scale=640:360 -c:v libx264 -b:v 800k -c:a aac -f flv rtmp://localhost:1935/live/360p \
+                -vf scale=1280:720 -c:v libx264 -b:v 2000k -c:a aac -f flv rtmp://localhost:1935/live/720p \
+                -vf scale=1920:1080 -c:v libx264 -b:v 5000k -c:a aac -f flv rtmp://localhost:1935/live/1080p \
+                -vf scale=640:360 -c:v libx264 -b:v 800k -c:a aac -f hls -hls_list_size 0 -hls_time 10 -hls_segment_filename /var/www/hls/360p_%03d.ts /var/www/hls/360p.m3u8;
+
+            # Alternative FFmpeg commands for streaming to different resolutions
+            # exec ffmpeg -i rtmp://localhost/live/$name -c:v copy -c:a aac -f flv rtmp://localhost:1935/live/360p;
+            # exec ffmpeg -i rtmp://localhost/live/$name -c:v copy -c:a aac -f flv rtmp://localhost:1935/live/720p;
+            # exec ffmpeg -i rtmp://localhost/live/$name -c:v copy -c:a aac -f flv rtmp://localhost:1935/live/1080p;
+
+			# uncomment the line below to prevent people from playing using RTMP
+			# deny play all;
+		}
+        }
+}
