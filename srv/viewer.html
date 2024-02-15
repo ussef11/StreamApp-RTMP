@@ -3,19 +3,112 @@
 <head>
     <meta charset="UTF-8">
     <title>HLS Live Streaming</title>
-	<link href="/js/video-js.css" rel="stylesheet" />
+    <link href="./js/video-js.css" rel="stylesheet" />
 </head>
 <body>
-  <video
-    id="my-video"
-    class="video-js"
-    controls
-    preload="auto"
-    width="1280"
-    height="720"
-    data-setup="{}">
-    <source src="/hls/stream1.m3u8" type="application/vnd.apple.mpegurl" />
-  </video>
-  <script src="/js/video.js"></script>
+
+  <div  style="
+  width: 100%;
+  justify-content: center;
+  text-align: center;
+">
+     
+    <span id="activeUser">  </span>
+
+  <div style="
+  display: flex;
+  justify-content: center;
+"> 
+
+    <video
+        id="my-video"
+        class="video-js"
+        controls
+        preload="auto"
+        width="1000"
+        height="600"
+        data-setup="{}">
+        <source src="/hls/1234.m3u8" type="application/vnd.apple.mpegurl" />
+    </video>
+
+  </div>
+
+  <div  style="
+  margin-top: 20px;
+"> 
+  <button style="
+  height: 40px;
+  border: none;
+  background-color: #52a500;
+  border-radius: 15px;
+  color: white;
+  font-weight: 600;
+" id="generate-random-value">Generate Random Value</button>
+    
+    <button style="
+    height: 40px;
+    border: none;
+    background-color: #52a500;
+    border-radius: 15px;
+    color: white;
+    font-weight: 600;
+" id="toggleStream">.....</button>
+</div>
+</div>
+  
+    <script src="./js/video.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.3.1/socket.io.js"></script>
+   
+
+    <script>
+  
+
+      const streambtn = document.getElementById('toggleStream');
+      const activeUser = document.getElementById('activeUser');
+      var socket = io.connect('http://localhost:5002');
+     
+      let isStream  = false 
+          function _toggleStream() {
+          
+            isStream = !isStream;
+            return isStream;
+    }
+
+
+    document.addEventListener('DOMContentLoaded', function(value) {
+      //socket.emit('toggleStream' , false);
+      streambtn.innerText =  isStream ? 'Stop Stream' : 'Start Stream';
+
+});
+     
+        function generateRandomValue() {
+            return Math.random();
+        }
+
+        socket.on('activeClients' , (value)=>{activeUser.innerText = `Watching Live ${value-1} ` })
+        socket.on('disconnect' , (value)=>{console.log("disconnect", value);})
+
+        // socket.on('toggleStream', (value) => {
+        
+         
+
+        // });
+
+
+        document.getElementById("generate-random-value").addEventListener("click", function () {
+            const randomValue = generateRandomValue();
+            socket.emit("randomValue", randomValue);
+            console.log("Sent Random Value to Server:", randomValue);
+        });
+
+        document.getElementById('toggleStream').addEventListener('click' , function(){
+          const  isStream = _toggleStream()
+            socket.emit('toggleStream' , isStream);
+            console.log(isStream)
+            streambtn.innerText = isStream ? 'Stop Stream' : 'Start Stream';
+            //window.location.reload()
+        })
+    </script>
 </body>
 </html>
+
