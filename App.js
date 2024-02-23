@@ -1,531 +1,316 @@
-import React, {useEffect, useMemo, useRef, useState} from 'react';
+import React, {useState, useEffect} from 'react';
 import {
-  Button,
-  Dimensions,
-  PermissionsAndroid,
-  Platform,
-  StyleSheet,
+  SafeAreaView,
   Text,
   TouchableOpacity,
-  UIManager,
   View,
-  findNodeHandle,
+  PermissionsAndroid,
+  Platform,
 } from 'react-native';
-import {NodePlayerView, NodeCameraView} from 'react-native-nodemediaclient';
-import {
-  useCameraDevices,
-  Camera,
-  FileSystem,
-  Permissions,
-  useCameraFormat,
-} from 'react-native-vision-camera';
+import {BleManager} from 'react-native-ble-plx';
+import {atob} from 'react-native-quick-base64';
 
-import RNRestart from 'react-native-restart';
-import RNFS from 'react-native-fs';
-
-import Video from 'react-native-video';
-import {PERMISSIONS, RESULTS, check, request} from 'react-native-permissions';
-import {execute, RNFFmpeg} from 'react-native-ffmpeg';
+import BluetoothStateManager from 'react-native-bluetooth-state-manager';
 
 const App = () => {
-  const vpRef = useRef();
+  // const [data, setData] = useState('No data');
+  const [bleManager, setBleManager] = useState(null);
+  const CHARACTERISTIC_UUID = 'beb5483e-36e1-4688-b7f5-ea07361b26a8'; // Characteristic UUID to read
+  const SERVICE_UUID = '4fafc201-1fb5-459e-8fcc-c5c9c331914b';
 
-  const saveFileToExternalStorage = async value => {
+  useEffect(() => {
+    initBLEManager();
+    return () => {
+      if (bleManager) {
+        bleManager.destroy();
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    const checkBluetoothState = async () => {
+      try {
+        await requestBluetoothPermission();
+        const bluetoothState = await BluetoothStateManager.getState();
+
+        switch (bluetoothState) {
+          case 'Unknown':
+          case 'Resetting':
+          case 'Unsupported':
+          case 'Unauthorized':
+            console.log('Bluetooth is not available:', bluetoothState);
+            break;
+          case 'PoweredOff':
+            console.log('Bluetooth is powered off:', bluetoothState);
+            BluetoothStateManager.enable().then(result => {
+              console.log(result);
+            });
+
+            break;
+          case 'PoweredOn':
+            console.log('Bluetooth is powered on:', bluetoothState);
+            break;
+          default:
+            console.log('Unknown Bluetooth state:', bluetoothState);
+            break;
+        }
+      } catch (error) {
+        console.error('Error checking Bluetooth state:', error);
+      }
+
+      BluetoothStateManager.addEventListener(
+        BluetoothStateManager.EVENT_BLUETOOTH_STATE_CHANGE,
+        bluetoothState => {
+          console.log(bluetoothState);
+          if (bluetoothState == 'PoweredOff') {
+            BluetoothStateManager.enable().then(result => {
+              console.log(result);
+            });
+          }
+        },
+      );
+    };
+
+    checkBluetoothState();
+  }, []);
+
+  const initBLEManager = async () => {
+    const manager = new BleManager();
+    setBleManager(manager);
+  };
+
+  const requestBluetoothPermission = async () => {
+    if (Platform.OS === 'ios') {
+      return true;
+    }
+    if (
+      Platform.OS === 'android' &&
+      PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION
+    ) {
+      const apiLevel = parseInt(Platform.Version.toString(), 10);
+
+      if (apiLevel < 31) {
+        const granted = await PermissionsAndroid.request(
+          PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION,
+        );
+        return granted === PermissionsAndroid.RESULTS.GRANTED;
+      }
+      if (
+        PermissionsAndroid.PERMISSIONS.BLUETOOTH_SCAN &&
+        PermissionsAndroid.PERMISSIONS.BLUETOOTH_CONNECT
+      ) {
+        const result = await PermissionsAndroid.requestMultiple([
+          PermissionsAndroid.PERMISSIONS.BLUETOOTH_SCAN,
+          PermissionsAndroid.PERMISSIONS.BLUETOOTH_CONNECT,
+          PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION,
+        ]);
+
+        return (
+          result['android.permission.BLUETOOTH_CONNECT'] ===
+            PermissionsAndroid.RESULTS.GRANTED &&
+          result['android.permission.BLUETOOTH_SCAN'] ===
+            PermissionsAndroid.RESULTS.GRANTED &&
+          result['android.permission.ACCESS_FINE_LOCATION'] ===
+            PermissionsAndroid.RESULTS.GRANTED
+        );
+      }
+    }
+
+    this.showErrorToast('Permission have not been granted');
+
+    return false;
+  };
+
+  const scanAndConnect = async () => {
+    if (!bleManager) {
+      console.error('BleManager not initialized');
+      return;
+    }
+
     try {
-      const granted = await PermissionsAndroid.request(
-        PermissionsAndroid.PERMISSIONS.WRITE_EXTERNAL_STORAGE,
-        {
-          title: 'Permission to access external storage',
-          message: 'We need your permission to access your external storage',
-          buttonPositive: 'Ok',
-          buttonNegative: 'Cancel',
+      const permissionGranted = await requestBluetoothPermission();
+      if (!permissionGranted) {
+        console.error('Bluetooth permissions not granted');
+        return;
+      }
+
+      console.log('Scanning for BLE devices...');
+      const scanning = await bleManager.startDeviceScan(
+        null,
+        null,
+        (error, device) => {
+          if (error) {
+            console.error('Scan error:', error);
+            //scanAndConnect();
+            return;
+          }
+
+          console.log('Found BLE device:', device.name, device.id);
+
+          if (device.name === 'ESP32-CAM') {
+            console.log('Connecting to device...');
+            bleManager.stopDeviceScan();
+            connectToDevice(device);
+          }
         },
       );
 
-      if (granted === PermissionsAndroid.RESULTS.GRANTED) {
-        const externalDirectoryPath = RNFS.ExternalStorageDirectoryPath;
-
-        const directoryName = 'MyguidData';
-        const directoryPath = `${externalDirectoryPath}/${directoryName}`;
-        await RNFS.mkdir(directoryPath);
-
-        const fileName = 'record.txt';
-        const filePath = `${directoryPath}/${fileName}`;
-
-        await RNFS.writeFile(filePath, value, 'utf8');
-
-        console.log('File saved successfully:', filePath);
-      } else {
-        console.log('External storage permission denied.');
-      }
+      console.log('Scanning:', scanning);
     } catch (error) {
-      console.error('Error saving file:', error);
+      console.error('Error scanning for BLE devices:', error);
     }
   };
 
-  const readTextFromFile = async () => {
+  const [isConnected, setIsConnected] = useState(false);
+
+  const [data, setData] = useState();
+
+  const connectToDevice = async device => {
     try {
-      const externalDirectoryPath = RNFS.ExternalStorageDirectoryPath;
-      const directoryName = 'MyguidData';
-      const fileName = 'record.txt';
-      const filePath = `${externalDirectoryPath}/${directoryName}/${fileName}`;
+      const connectedDevice = await device.connect();
+      console.log('Connected to device:', connectedDevice.name);
 
-      const fileExists = await RNFS.exists(filePath);
-      if (!fileExists) {
-        console.log('File does not exist at path:', filePath);
-        return null;
-      }
+      console.log('Is device connected:', connectedDevice.id);
 
-      const fileContent = await RNFS.readFile(filePath, 'utf8');
-      console.log('File content:', fileContent);
-      return fileContent;
-    } catch (error) {
-      console.error('Error reading file:', error);
-      return null;
-    }
-  };
+      console.log('Discovering services and characteristics...');
 
-  const config = {
-    cameraConfig: {
-      cameraId: 1,
-      cameraFrontMirror: false,
-    },
-    videoConfig: {
-      preset: 4,
-      bitrate: 2000000,
-      profile: 2,
-      fps: 30,
-      videoFrontMirror: true,
-    },
-    audioConfig: {
-      bitrate: 128000,
-      profile: 1,
-      samplerate: 44100,
-    },
-  };
-  const handleStatus = event => {
-    console.log('RTMP Status:', event);
-  };
-  const [FinishCompressed, setFinishCompressed] = useState(false);
+      setIsConnected(true);
 
-  const startStream = async () => {
-    await saveFileToExternalStorage('true');
-    await stopRecording();
-  };
+      // await device.discoverAllServicesAndCharacteristics();
+      // const servicesa = await device.services();
+      // servicesa.forEach(async service => {
+      //   const characteristics = await device.characteristicsForService(
+      //     service.uuid,
+      //   );
+      //   characteristics.forEach(console.log);
+      // });
 
-  useEffect(() => {
-    console.log('45454545454545', isRecording);
-    if (FinishCompressed && isRecording === false) {
-      console.log('restart');
-      RNRestart.restart();
-    }
-  }, [FinishCompressed]);
+      const services =
+        await connectedDevice.discoverAllServicesAndCharacteristics();
 
-  const [isStream, setIsStream] = useState();
+      const service1 = await device.services();
+      let mergedArray = [];
 
-  useEffect(() => {
-    const _StartStream = async () => {
-      const fileContent = await readTextFromFile();
-      console.log('File content:', fileContent);
-      if (fileContent !== null) {
-        setIsStream(fileContent);
-      } else {
-        setIsStream('false');
-        await startRecording();
-      }
-      if (fileContent == 'true') {
-        await PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.CAMERA);
-        try {
-          vpRef.current.start();
-        } catch (error) {
-          console.error('Error starting stream:', error);
-        }
-      } else if (fileContent == 'false') {
-        await startRecording();
-      }
-    };
-
-    _StartStream();
-  }, []);
-
-  useEffect(() => {
-    let i = 0;
-    const interval = setInterval(async () => {
-      const fileContent = await readTextFromFile();
-
-      console.log('--0-', i);
-      console.log(fileContent);
-      if (fileContent == 'false' || fileContent == null) {
-        console.log('+++', i);
-
-        console.log('record Stopping', i);
-        stopRecording();
-        console.log('record resuming', i);
-        startRecording();
-      }
-      i++;
-    }, 60000);
-    return () => clearInterval(interval);
-  }, []);
-
-  const stopStream = async () => {
-    await vpRef.current.stop();
-    await startRecording();
-    saveFileToExternalStorage('false');
-    RNRestart.restart();
-  };
-  const restart = () => {};
-  const readtext = () => {};
-
-  const streamKey = '5b2a4a75-86c2-177c-72a2-45ab2b5e2583';
-  const url = `rtmp://192.168.100.50:1935/live/1234`;
-
-  const cameraRef = useRef();
-
-  const [isRecording, setIsRecording] = useState(false);
-  const [videoPath, setVideoPath] = useState('');
-
-  const startRecording = async () => {
-    //stopStream();
-    console.log('recording .........');
-    // await PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.CAMERA);
-    // await PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.AUDIO);
-    const granted = await PermissionsAndroid.request(
-      PermissionsAndroid.PERMISSIONS.WRITE_EXTERNAL_STORAGE,
-      {
-        title: 'Permission to access external storage',
-        message: 'We need your permission to access your external storage',
-        buttonPositive: 'Ok',
-        buttonNegative: 'Cancel',
-      },
-    );
-
-    if (granted === PermissionsAndroid.RESULTS.GRANTED) {
-      try {
-        setIsRecording(true);
-        console.log('startRecording');
-
-        const externalDirectoryPath = RNFS.ExternalStorageDirectoryPath;
-        const directoryName = 'AllRecord';
-        const fileName = 'video.mp4';
-        const filePath = `${externalDirectoryPath}/${directoryName}/${fileName}`;
-
-        await cameraRef.current.startRecording({
-          videoBitRate: 'low',
-          maxDuration: 10,
-          //maxFileSize: 100 * 1024 * 1024,
-          outputPath: filePath,
-          format: {format},
-          onRecordingFinished: async video => {
-            console.log('Recording finished:', video);
-            await compressVideoAndSave(video.path);
-          },
-          onRecordingError: error => console.error(error),
-        });
-      } catch (err) {
-        console.log(err);
-      }
-    }
-  };
-
-  const stopRecording = async () => {
-    setIsRecording(false);
-    await cameraRef.current.stopRecording();
-    console.log('Stop Recording');
-  };
-
-  const compressVideoAndSave = async inputPath => {
-    try {
-      const folderPath = RNFS.ExternalStorageDirectoryPath + '/AllRecord';
-
-      let totalSizeMB = await calculateolderSize(folderPath);
-
-      while (totalSizeMB > MAX_FOLDER_SIZE_MB) {
-        console.log(
-          `Folder size exceeds ${MAX_FOLDER_SIZE_MB} MB. Removing oldest video...`,
+      console.log(service1);
+      for (const service of service1) {
+        const characteristics = await device.characteristicsForService(
+          service.uuid,
         );
-        RemoveoldsetVideo();
-        console.log('totalSizeMB', totalSizeMB);
-        totalSizeMB = await calculateolderSize(folderPath);
+        for (const characteristic of characteristics) {
+          characteristic.monitor((error, update) => {
+            if (error) {
+              console.error(`Characteristic monitor error: ${error}`);
+              return;
+            }
+            const decodedData = atob(update.value);
+            const newData = JSON.parse(decodedData);
+
+            setData(prevData => {
+              const updatedData = {...prevData};
+
+              for (const key in newData) {
+                if (newData.hasOwnProperty(key)) {
+                  updatedData[key] = newData[key];
+                }
+              }
+
+              return updatedData;
+            });
+          });
+        }
       }
-    } catch (error) {
-      console.log('err', error);
-    }
 
-    setFinishCompressed(false);
-    const outputDir = `${RNFS.ExternalStorageDirectoryPath}/AllRecord`;
-    const outputFileName = 'compressed_video.mp4';
-    const outputPath = `${outputDir}/${outputFileName}`;
-    console.log('inputPath', inputPath);
+      console.log('Services and characteristics:', services);
 
-    //start save
-
-    await saveVideoToExternalStorage(inputPath);
-    console.log('FFmpeg process completed successfully');
-    setFinishCompressed(true);
-    //end save
-
-    //start compress
-    //const command = `-y -i ${inputPath} -vf scale=426:240 -b:v 500k ${outputPath}`;
-    // const command = `-i ${inputPath} -vf scale=480:720 -b:v 500k ${outputPath}`;
-    // try {
-    //   const result = await RNFFmpeg.executeAsync(
-    //     command,
-    //     completedExecution => {
-    //       if (completedExecution.returnCode === 0) {
-    //         saveVideoToExternalStorage(outputPath);
-    //         console.log('FFmpeg process completed successfully');
-    //         setFinishCompressed(true);
-    //       } else {
-    //         console.log(
-    //           `FFmpeg process failed with rc=${completedExecution.returnCode}.`,
-    //         );
-    //       }
-    //     },
-    //   ).then(executionId =>
-    //     console.log(
-    //       `Async FFmpeg process started with executionId ${executionId}.`,
-    //     ),
-    //   );
-
-    //   console.log('FFmpeg output:', result);
-    //   console.log('Video compression successful');
-    // } catch (error) {
-    //   console.error('Error compressing video:', error);
-    // }
-
-    //end compress
-  };
-
-  const saveVideoToExternalStorage = async videoPath => {
-    console.log(5555555555555555555555555555);
-    try {
-      const currentDate = new Date();
-      const formattedDate = currentDate.toISOString().split('T')[0];
-      const formattedTime = currentDate
-        .toTimeString()
-        .split(' ')[0]
-        .replace(/:/g, '-');
-      const fileName = `${formattedDate}_${formattedTime}.mp4`;
-      const externalDirectoryPath = RNFS.ExternalStorageDirectoryPath;
-      const directoryName = 'AllRecord';
-      const destinationPath = `${externalDirectoryPath}/${directoryName}/${fileName}`;
-
-      const directoryExists = await RNFS.exists(
-        `${externalDirectoryPath}/${directoryName}`,
+      console.log('Reading characteristic value...');
+      const characteristic = await connectedDevice.readCharacteristicForService(
+        SERVICE_UUID,
+        CHARACTERISTIC_UUID,
       );
-      if (!directoryExists) {
-        await RNFS.mkdir(`${externalDirectoryPath}/${directoryName}`);
-      }
 
-      await RNFS.moveFile(videoPath, destinationPath);
-      console.log('Video saved to external storage:', destinationPath);
+      // const data = readCharacteristic(characteristic, connectedDevice);
+      // console.log('-----------data', data);
+      // setData(data);
     } catch (error) {
-      console.error('Error saving video to external storage:', error);
+      console.error('Error connecting to device:', error);
     }
   };
-
-  const devices = useCameraDevices();
-  const _device = devices[1];
-
-  const [device, setDevice] = useState(null);
-  const [format, setFormat] = useState(null);
 
   useEffect(() => {
-    if (_device) {
-      setDevice(_device);
-      console.log('formatformat', _device.formats);
-      const desiredResolution = {width: 352, height: 288};
+    console.log('ff', data);
+  }, [data]);
 
-      const matchingFormat = _device.formats.find(
-        f =>
-          f.videoWidth === desiredResolution.width &&
-          f.videoHeight === desiredResolution.height,
-      );
+  const readCharacteristic = (characteristic, connectedDevice) => {
+    if (characteristic) {
+      characteristic.monitor((error, update) => {
+        if (error) {
+          console.error(`Characteristic monitor error: ${error}`);
 
-      console.log('matching', matchingFormat);
-      if (matchingFormat) {
-        setFormat(matchingFormat);
-      } else {
-        console.warn('Desired resolution not supported');
-      }
-    }
-  }, [_device]);
-
-  const MAX_FOLDER_SIZE_MB = 10;
-
-  const calculateolderSize = async folderPath => {
-    try {
-      const folderStat: StatResult = await RNFS.stat(folderPath);
-      if (folderStat && folderStat.isDirectory()) {
-        const files = await RNFS.readdir(folderPath);
-        let totalSize = 0;
-        for (const file of files) {
-          const filePath = `${folderPath}/${file}`;
-          const fileStat: StatResult = await RNFS.stat(filePath);
-          if (fileStat.isFile() && filePath.endsWith('.mp4')) {
-            totalSize += fileStat.size;
-          }
-        }
-        const totalSizeMB = totalSize / (1024 * 1024);
-        return totalSizeMB;
-      }
-    } catch (err) {
-      console.log(err);
-    }
-  };
-
-  const checkAndRemoveOldestVideo = async (folderPath: string) => {
-    try {
-      const folderStat: StatResult = await RNFS.stat(folderPath);
-      if (folderStat && folderStat.isDirectory()) {
-        const files = await RNFS.readdir(folderPath);
-
-        let oldestVideo = null;
-        let oldestVideoTime = Number.MAX_SAFE_INTEGER;
-        for (const file of files) {
-          const filePath = `${folderPath}/${file}`;
-          const fileStat: StatResult = await RNFS.stat(filePath);
-          if (fileStat.isFile() && filePath.endsWith('.mp4')) {
-            if (fileStat.mtime < oldestVideoTime) {
-              oldestVideo = filePath;
-              oldestVideoTime = fileStat.mtime;
-            }
-          }
-        }
-        const totalSizeMB = await calculateolderSize(folderPath);
-        console.log(5555555555555555, totalSizeMB);
-        if (totalSizeMB > MAX_FOLDER_SIZE_MB && oldestVideo) {
-          console.log(
-            `Folder size exceeds ${MAX_FOLDER_SIZE_MB} MB. Removing oldest video: ${oldestVideo}`,
+          BluetoothStateManager.addEventListener(
+            BluetoothStateManager.EVENT_BLUETOOTH_STATE_CHANGE,
+            bluetoothState => {
+              console.log(bluetoothState);
+              if (bluetoothState == 'PoweredOn') {
+                scanAndConnect();
+              }
+            },
           );
-          await RNFS.unlink(oldestVideo);
+
+          // setTimeout(async () => {
+          //   await scanAndConnect();
+          // }, 3000);
+
+          return;
         }
-      } else {
-        console.log('Path is not a directory');
-      }
-    } catch (error) {
-      console.error(
-        'Error checking folder size and removing oldest video:',
-        error,
-      );
+
+        //console.log('Is Characteristics Readable:', update.isReadable);
+        //console.log('Heart Rate Data (Base64):', update.value);
+
+        const decodedData = atob(update.value);
+        console.log(decodedData);
+        return decodedData;
+      });
+
+      // Check for disconnection
+      connectedDevice.onDisconnected((error, disconnectedDevice) => {
+        if (error) {
+          console.error(`Disconnection error: ${error}`);
+          return;
+        }
+
+        console.log('Device disconnected:', disconnectedDevice.name);
+        scanAndConnect();
+      });
     }
   };
+  // const disconnectFromDevice = async deviceId => {
+  //   try {
+  //     await bleManager.cancelDeviceConnection(deviceId);
+  //     console.log('Disconnected from device:', deviceId);
+  //     // Update connection status
+  //     setIsConnected(false);
+  //   } catch (error) {
+  //     console.error('Error disconnecting from device:', error);
+  //   }
+  // };
 
-  const RemoveoldsetVideo = () => {
-    const folderPath = RNFS.ExternalStorageDirectoryPath + '/AllRecord';
-
-    checkAndRemoveOldestVideo(folderPath);
-  };
   return (
-    <View style={{flex: 1}}>
+    <SafeAreaView
+      style={{flex: 1, justifyContent: 'center', alignItems: 'center'}}>
+      <TouchableOpacity
+        onPress={scanAndConnect}
+        style={{padding: 20, backgroundColor: 'blue', borderRadius: 5}}>
+        <Text style={{color: '#fff'}}>Start Scanning</Text>
+      </TouchableOpacity>
+
       <View>
-        <Button title="Start Stream" onPress={startStream} />
-        <Button title="Stop Stream" onPress={stopStream} />
-        <Button title="Start Recording" onPress={startRecording} />
-        <Button title="Stop Recording" onPress={stopRecording} />
-        <Button
-          title="Save File to External Storage"
-          onPress={RemoveoldsetVideo}
-        />
-        {/* <View style={{height: 200}}>
-          <Camera
-            style={{flex: 1}}
-            ref={cameraRef}
-            device={devices[1]}
-            isActive={true}
-          />
-        </View> */}
-
-        <>
-          {isStream == 'false' ? (
-            <View style={{height: 1}}>
-              {/* {console.log('isStream', isStream)} */}
-              {console.log(format)}
-              <Camera
-                quality="360p"
-                style={{flex: 1, transform: [{rotate: '90deg'}]}}
-                device={_device}
-                isActive={true}
-                ref={cameraRef}
-                video={true}
-                orientation="landscapeLeft"
-                format={format}
-              />
-              {videoPath !== '' && (
-                <View style={styles.videoPlayer}>
-                  <Video
-                    source={{uri: videoPath}}
-                    style={styles.videoPlayer}
-                    controls
-                  />
-                </View>
-              )}
-            </View>
-          ) : (
-            <NodeCameraView
-              style={{height: 1}}
-              ref={vpRef}
-              outputUrl={url}
-              camera={config.cameraConfig}
-              audio={config.audioConfig}
-              video={config.videoConfig}
-              autopreview={true}
-              onStatus={(code, msg) => {
-                console.log('onStatus=' + code + ' msg=' + msg);
-              }}
-            />
-          )}
-        </>
+        {data &&
+          Object.keys(data).map(key => (
+            <Text key={key}>{`${key}: ${data[key]}`}</Text>
+          ))}
       </View>
-
-      {/* <NodePlayerView
-        style={{height: 200}}
-        ref={vpRef}
-        outputUrl={'rtmp://192.168.100.50:1935/live/1234'} // Corrected outputUrl
-        camera={{cameraId: 0, cameraFrontMirror: true}}
-        audio={{bitrate: 32000, profile: 1, samplerate: 44100}}
-        video={{
-          preset: 12,
-          bitrate: 400000,
-          profile: 1,
-          fps: 15,
-          videoFrontMirror: false,
-        }}
-        scaleMode={'ScaleAspectFit'}
-        bufferTime={300}
-        maxBufferTime={1000}
-        autoplay={false}
-        autopreview={true}
-        onStatus={event => handleStatus(event)}
-      /> */}
-    </View>
+    </SafeAreaView>
   );
 };
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#000',
-  },
-  camera: {
-    flex: 1,
-  },
-  recordButton: {
-    position: 'absolute',
-    bottom: 20,
-    left: 20,
-    right: 20,
-    backgroundColor: 'red',
-    padding: 20,
-    alignItems: 'center',
-  },
-  recordButtonText: {
-    fontSize: 18,
-    color: '#fff',
-  },
-  videoPlayer: {
-    flex: 1,
-    marginTop: 20,
-  },
-});
+
 export default App;
